@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hacks-a-Sketch</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/95css@latest/css/95css.min.css" />
+
+  <style>
+    :root {
+      --accent: #a40094;
+      --bg: #c0c0c0;
+      --win: #fff;
+      --ink: #111;
+      --border: #0006;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background-image: url(https://wallpapers.com/images/high/80s-retro-ad20kge7hme1vc0c.webp);
+      background-position: center;
+      background-repeat: no-repeat;
+      background-size: cover;
+      color: var(--ink);
+    }
+
+    .desktop {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      grid-template-rows: 1fr auto;
+    }
+
+    .window {
+      width: min(760px, 92vw);
+      margin: 3vh auto 8vh;
+      background: var(--win);
+      border: 2px solid var(--border);
+      box-shadow: 4px 4px 0 #0004;
+    }
+
+    .title-bar {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      background: linear-gradient(to right, #0008, #0000), var(--accent);
+      color: #fff;
+      padding: 6px 8px;
+    }
+
+    .title-bar-text {
+      font-weight: 700;
+    }
+
+    .title-bar-controls button {
+      width: 16px;
+      height: 16px;
+      margin-left: 4px;
+    }
+
+    .window-body {
+      padding: 12px;
+    }
+
+    /* Layout inside window */
+    .palette {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0 12px;
+    }
+
+    .swatch {
+      width: 28px;
+      height: 28px;
+      border: 2px solid #0002;
+      cursor: pointer;
+    }
+
+    .swatch.active {
+      outline: 3px solid var(--accent);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(8, 40px);
+      gap: 6px;
+      justify-content: center;
+      padding: 14px;
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      margin: 0 auto;
+    }
+
+    .cell {
+      width: 40px;
+      height: 40px;
+      background: #000;
+      border: 1px solid #0004;
+      cursor: crosshair;
+    }
+
+    .status {
+      margin-top: 10px;
+      text-align: center;
+      font-size: 13px;
+      opacity: .85;
+    }
+
+    /* Bottom “taskbar” */
+    .taskbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 8px;
+      background: #e0e0e0;
+      border-top: 2px solid #0004;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .btn {
+      padding: 8px 12px;
+      background: #fff;
+      border: 2px solid #0004;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: #004;
+    }
+
+    .btn:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 480px) {
+      .grid {
+        grid-template-columns: repeat(8, 32px);
+      }
+
+      .cell {
+        width: 32px;
+        height: 32px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="desktop">
+    <div class="window" role="dialog" aria-label="Hacks-a-Sketch">
+      <div class="title-bar">
+        <div class="title-bar-text">PuraSec presents: Hacks-a-Sketch</div>
+      </div>
+      <img src="logo.png">
+      <div class="palette" id="palette"></div>
+      <div class="grid" id="grid"></div>
+      <div class="status" id="status">Not connected.</div>
+    </div>
+    <div class="taskbar" role="toolbar" aria-label="Controls">
+      <button id="connect" class="btn primary">Connect</button>
+      <button id="reconnect" class="btn">Reconnect</button>
+      <button id="upload" class="btn" disabled>Upload</button>
+      <button id="clear" class="btn">Clear</button>
+      <button id="fill" class="btn">Fill</button>
+    </div>
+  </div>
+
+  <script>
+    const W = 8, H = 8, N = 64;
+    const COLORS = [
+      { name: "OFF", idx: 0, css: "#000000" },
+      { name: "RED", idx: 1, css: "#ff0000" },
+      { name: "GREEN", idx: 2, css: "#00ff00" },
+      { name: "BLUE", idx: 3, css: "#0088ff" },
+      { name: "PURPLE", idx: 4, css: "#800080" },
+      { name: "WHITE", idx: 5, css: "#ffffff" },
+    ];
+    let current = 1;
+    const bitmap = new Uint8Array(N);
+    const idx = (x, y) => y * W + x;
+    const gridEl = document.getElementById('grid');
+    const palEl = document.getElementById('palette');
+    const statusEl = document.getElementById('status');
+    const cells = [];
+
+    const setStatus = t => statusEl.textContent = t;
+
+    function buildPalette() {
+      palEl.innerHTML = "";
+      COLORS.forEach((c, i) => {
+        const sw = document.createElement('div');
+        sw.className = 'swatch' + (c.idx === current ? ' active' : '');
+        sw.style.background = c.css; sw.title = c.name;
+        sw.onclick = () => {
+          current = c.idx;
+          document.querySelectorAll('.swatch').forEach(e => e.classList.remove('active'));
+          sw.classList.add('active');
+        };
+        palEl.appendChild(sw);
+      });
+    }
+    function buildGrid() {
+      gridEl.innerHTML = "";
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = idx(x, y);
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.style.background = COLORS[bitmap[i]].css;
+          let drawing = false;
+
+          const paint = () => {
+            if (bitmap[i] !== current) {
+              bitmap[i] = current;
+              cell.style.background = COLORS[current].css;
+              enqueueXYI(x, y, current);
+              noteUserActivity();
+            }
+          };
+          cell.onmousedown = e => { drawing = true; paint(); e.preventDefault(); };
+          window.onmouseup = () => { drawing = false; };
+
+          cell.oncontextmenu = e => {
+            e.preventDefault();
+            current = bitmap[i];
+            document.querySelectorAll('.swatch').forEach(e => e.classList.remove('active'));
+            const active = COLORS.findIndex(c => c.idx === current);
+            if (palEl.children[active]) palEl.children[active].classList.add('active');
+          };
+
+          cells.push(cell);
+          gridEl.appendChild(cell);
+        }
+      }
+    }
+    function refreshGrid() { for (let i = 0; i < N; i++) cells[i].style.background = COLORS[bitmap[i]].css; }
+
+    let port = null, writer = null, reader = null;
+    const enc = new TextEncoder(), dec = new TextDecoder();
+
+    const QUIET_MS_BEFORE_SLEEP = 6000;
+    const HEARTBEAT_IDLE_MS = 3000;
+
+    let lastSendAt = 0;
+    let activityAt = 0;
+    let hbTimer = null;
+
+    function noteUserActivity() {
+      activityAt = performance.now();
+      startTempHeartbeat();
+    }
+
+    function startTempHeartbeat() {
+      stopTempHeartbeat();
+      hbTimer = setInterval(() => {
+        if (performance.now() - activityAt > HEARTBEAT_IDLE_MS) {
+          stopTempHeartbeat();
+          return;
+        }
+        safeSend("PING\n");
+      }, 1000);
+    }
+    function stopTempHeartbeat() {
+      if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+    }
+
+    async function connectSerialInteractive() {
+      if (!('serial' in navigator)) { setStatus('Web Serial not supported (Chrome/Edge).'); return; }
+      try {
+        port = await navigator.serial.requestPort({});
+        await openPort(port);
+      } catch (e) {
+        setStatus('Connect failed: ' + e.message);
+      }
+    }
+
+    async function reconnectGrantedPort() {
+      if (!('serial' in navigator)) { setStatus('Web Serial not supported.'); return; }
+      const ports = await navigator.serial.getPorts();
+      if (!ports.length) { setStatus('No previously granted port.'); return; }
+      try { await openPort(ports[0]); }
+      catch (e) { setStatus('Reconnect failed: ' + e.message); }
+    }
+
+    async function openPort(prt) {
+      await prt.open({ baudRate: 115200 });
+      writer = prt.writable.getWriter();
+      setStatus('Connected.');
+      document.getElementById('upload').disabled = false;
+
+      readLoop(prt).catch(() => { });
+
+      await writeRaw("\n\n");
+      setTimeout(() => safeSend("PING\n"), 20);
+    }
+
+    async function readLoop(prt) {
+      reader = prt.readable.getReader();
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) setStatus(dec.decode(value));
+        }
+      } catch (e) {
+        setStatus('Read ended: ' + e.message);
+      } finally {
+        try { reader.releaseLock(); } catch { }
+        try { writer && writer.releaseLock && writer.releaseLock(); } catch { }
+        writer = null; reader = null; port = null;
+        document.getElementById('upload').disabled = true;
+        stopTempHeartbeat();
+        setStatus('Disconnected.');
+      }
+    }
+
+    async function writeRaw(txt) {
+      if (!writer) { setStatus('Not connected.'); return; }
+      try { await writer.write(enc.encode(txt)); }
+      catch (e) { setStatus('Write error: ' + e.message); }
+    }
+
+    async function safeSend(line) {
+      const now = performance.now();
+      if (now - lastSendAt > QUIET_MS_BEFORE_SLEEP) {
+        await writeRaw("\n\n");
+        await new Promise(r => setTimeout(r, 12));
+      }
+      await writeRaw(line);
+      lastSendAt = performance.now();
+    }
+
+    let pending = [];
+    let rafScheduled = false;
+
+    function enqueueXYI(x, y, cidx) {
+      pending.push({ x, y, idx: cidx });
+      if (!rafScheduled) {
+        rafScheduled = true;
+        requestAnimationFrame(flushBatch);
+      }
+    }
+
+    async function flushBatch() {
+      rafScheduled = false;
+      if (!writer || pending.length === 0) return;
+
+      const last = new Map();
+      for (const p of pending) { last.set(p.y * 16 + p.x, p); }
+      pending = [];
+
+      let out = "BEGIN\n";
+      for (const p of last.values()) out += `XYI ${p.x} ${p.y} ${p.idx}\n`;
+      out += "END\n";
+
+      await safeSend(out);
+    }
+
+    function bitmapLine() { return "BMP " + Array.from(bitmap).join(' ') + "\n"; }
+    async function uploadBitmap() { await safeSend(bitmapLine()); setStatus('Sent frame.'); }
+
+    document.getElementById('connect').onclick = connectSerialInteractive;
+    document.getElementById('reconnect').onclick = reconnectGrantedPort;
+    document.getElementById('upload').onclick = uploadBitmap;
+    document.getElementById('clear').onclick = () => { bitmap.fill(0); refreshGrid(); uploadSoon(); };
+    document.getElementById('fill').onclick = () => { bitmap.fill(current); refreshGrid(); uploadSoon(); };
+
+    let ffTimer = null;
+    function uploadSoon() { clearTimeout(ffTimer); ffTimer = setTimeout(uploadBitmap, 60); }
+
+    buildPalette(); buildGrid();
+  </script>
+</body>
+
+</html>
